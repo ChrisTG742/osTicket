@@ -43,7 +43,7 @@ if ($thisstaff && $thisstaff->is2FAPending())
             <input type="hidden" name="do" value="scplogin">
             <fieldset>
             <input type="text" name="userid" id="name" value="<?php
-                echo $info['userid']; ?>" placeholder="<?php echo __('Email or Username'); ?>"
+                echo $info['userid'] ?? null; ?>" placeholder="<?php echo __('Email or Username'); ?>"
                 autofocus autocorrect="off" autocapitalize="off">
             <input type="password" name="passwd" id="pass" placeholder="<?php echo __('Password'); ?>" autocorrect="off" autocapitalize="off">
                 <h3 style="display:inline"><a id="reset-link" class="<?php
@@ -172,6 +172,6 @@ if (count($ext_bks)) { ?>
         #loginBox:after { background-color: white !important; }
     </style>
     <![endif]-->
-    <script type="text/javascript" src="<?php echo ROOT_PATH; ?>js/jquery-ui-1.12.1.custom.min.js"></script>
+    <script type="text/javascript" src="<?php echo ROOT_PATH; ?>js/jquery-ui-1.13.1.custom.min.js"></script>
 </body>
 </html>

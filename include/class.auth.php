@@ -134,7 +134,7 @@ class ClientCreateRequest {
     function attemptAutoRegister() {
         global $cfg;
 
-        if (!$cfg || !$cfg->isClientRegistrationEnabled())
+        if (!$cfg || $cfg->isClientRegistrationMode(['disabled']))
             return false;
 
         // Attempt to automatically register
@@ -280,7 +280,7 @@ abstract class AuthenticationBackend {
      * $forcedAuth - indicate if authentication is required.
      *
      */
-    function processSignOn(&$errors, $forcedAuth=true) {
+    static function processSignOn(&$errors, $forcedAuth=true) {
 
         foreach (static::allRegistered() as $bk) {
             // All backends are queried here, even if they don't support
@@ -437,7 +437,7 @@ abstract class AuthenticationBackend {
     abstract function authenticate($username, $password);
     abstract function login($user, $bk);
     abstract static function getUser(); //Validates  authenticated users.
-    abstract function getAllowedBackends($userid);
+    abstract static function getAllowedBackends($userid);
     abstract protected function getAuthKey($user);
     abstract static function signOut($user);
 }
@@ -489,7 +489,7 @@ abstract class StaffAuthenticationBackend  extends AuthenticationBackend {
         return array_merge(self::$_registry, parent::allRegistered());
     }
 
-    function isBackendAllowed($staff, $bk) {
+    static function isBackendAllowed($staff, $bk) {
 
         if (!($backends=self::getAllowedBackends($staff->getId())))
             return true;  //No restrictions
@@ -509,7 +509,7 @@ abstract class StaffAuthenticationBackend  extends AuthenticationBackend {
         return $policies;
     }
 
-    function getAllowedBackends($userid) {
+    static function getAllowedBackends($userid) {
 
         $backends =array();
         //XXX: Only one backend can be specified at the moment.
@@ -563,9 +563,12 @@ abstract class StaffAuthenticationBackend  extends AuthenticationBackend {
         $authsession['id'] = $staff->getId();
         $authsession['key'] =  $authkey;
         $authsession['2fa'] =  $auth2fa;
-
+        // Set TIME_BOMB to regenerate the session 10 seconds after login
+        $_SESSION['TIME_BOMB'] = time() + 10;
+        // Set session token
+        $staff->setSessionToken();
+        // Set Auth Key
         $staff->setAuthKey($authkey);
-        $staff->refreshSession(true); //set the hash.
         Signal::send('auth.login.succeeded', $staff);
 
         if ($bk->supportsInteractiveAuthentication())
@@ -612,6 +615,7 @@ abstract class StaffAuthenticationBackend  extends AuthenticationBackend {
         if (!($bk=static::getBackend($id)) //get the backend
                 || !($staff = $bk->validate($auth)) //Get AuthicatedUser
                 || !($staff instanceof Staff)
+                || !$staff->isActive()
                 || $staff->getId() != $_SESSION['_auth']['staff']['id'] // check ID
         )
             return null;
@@ -636,7 +640,9 @@ abstract class StaffAuthenticationBackend  extends AuthenticationBackend {
 
     protected function validate($authkey) {
 
-        if (($staff = StaffSession::lookup($authkey)) && $staff->getId())
+        if (($staff = StaffSession::lookup($authkey))
+            && $staff->getId()
+            && $staff->isActive())
             return $staff;
     }
 }
@@ -718,7 +724,7 @@ abstract class UserAuthenticationBackend  extends AuthenticationBackend {
         return $policies;
     }
 
-    function getAllowedBackends($userid) {
+    static function getAllowedBackends($userid) {
         $backends = array();
         $sql = 'SELECT A1.backend FROM '.USER_ACCOUNT_TABLE
               .' A1 INNER JOIN '.USER_EMAIL_TABLE.' A2 ON (A2.user_id = A1.user_id)'
@@ -754,13 +760,11 @@ abstract class UserAuthenticationBackend  extends AuthenticationBackend {
 
         // Tag the user and associated ticket in the SESSION
         $this->setAuthKey($user, $bk, $authkey);
-
+        // Set Session Token
+        $user->setSessionToken();
         //The backend used decides the format of the auth key.
         // XXX: encrypt to hide the bk??
         $user->setAuthKey($authkey);
-
-        $user->refreshSession(true); //set the hash.
-
         //Log login info...
         $msg=sprintf(_S('%1$s (%2$s) logged in [%3$s]'
                 /* Tokens are <username>, <id>, and <ip> */),
@@ -770,6 +774,9 @@ abstract class UserAuthenticationBackend  extends AuthenticationBackend {
         $u = $user->getSessionUser()->getUser();
         $type = array('type' => 'login');
         Signal::send('person.login', $u, $type);
+
+        // Set TIME_BOMB to regenerate the session 10 seconds after login
+        $_SESSION['TIME_BOMB'] = time() + 10;
 
         if ($bk->supportsInteractiveAuthentication() && ($acct=$user->getAccount()))
             $acct->cancelResetTokens();
@@ -831,6 +838,9 @@ abstract class UserAuthenticationBackend  extends AuthenticationBackend {
                 )
             return null;
 
+        if (($account=$user->getAccount()) && !$account->isActive())
+            return null;
+
         $user->setAuthKey($_SESSION['_auth']['user']['key']);
 
         return $user;
@@ -839,7 +849,9 @@ abstract class UserAuthenticationBackend  extends AuthenticationBackend {
     protected function validate($userid) {
         if (!($user = User::lookup($userid)))
             return false;
-        elseif (!$user->getAccount())
+        elseif (!($account=$user->getAccount()))
+            return false;
+        elseif (!$account->isActive())
             return false;
 
         return new ClientSession(new EndUser($user));
@@ -928,7 +940,7 @@ abstract class AuthStrikeBackend extends AuthenticationBackend {
         return false;
     }
 
-    function getAllowedBackends($userid) {
+    static function getAllowedBackends($userid) {
         return array();
     }
 
@@ -945,8 +957,8 @@ abstract class AuthStrikeBackend extends AuthenticationBackend {
 
     }
 
-    abstract function authStrike($credentials);
-    abstract function authTimeout();
+    abstract static function authStrike($credentials);
+    abstract static function authTimeout();
 }
 
 /*
@@ -954,13 +966,13 @@ abstract class AuthStrikeBackend extends AuthenticationBackend {
  */
 class StaffAuthStrikeBackend extends  AuthStrikeBackend {
 
-    function authTimeout() {
+    static function authTimeout() {
         global $ost;
 
         $cfg = $ost->getConfig();
 
         $authsession = &$_SESSION['_auth']['staff'];
-        if (!$authsession['laststrike'])
+        if (!isset($authsession['laststrike']))
             return;
 
         //Veto login due to excessive login attempts.
@@ -975,7 +987,7 @@ class StaffAuthStrikeBackend extends  AuthStrikeBackend {
         $authsession['strikes']=0;
     }
 
-    function authstrike($credentials) {
+    static function authstrike($credentials) {
         global $ost;
 
         $cfg = $ost->getConfig();
@@ -1023,7 +1035,7 @@ StaffAuthenticationBackend::register('StaffAuthStrikeBackend');
  */
 class UserAuthStrikeBackend extends  AuthStrikeBackend {
 
-    function authTimeout() {
+    static function authTimeout() {
         global $ost;
 
         $cfg = $ost->getConfig();
@@ -1044,7 +1056,7 @@ class UserAuthStrikeBackend extends  AuthStrikeBackend {
         $authsession['strikes']=0;
     }
 
-    function authstrike($credentials) {
+    static function authstrike($credentials) {
         global $ost;
 
         $cfg = $ost->getConfig();

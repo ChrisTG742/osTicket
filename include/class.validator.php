@@ -190,6 +190,10 @@ class Validator {
         return true;
     }
 
+    static function is_emailish($email) {
+        return (preg_match('/(.*@.{2,})|(.{2,}@.*)/', $email));
+    }
+
     static function is_numeric($number, &$error='') {
         if (!is_numeric($number))
             $error = __('Enter a Number');
@@ -233,7 +237,7 @@ class Validator {
     }
 
     static function is_formula($text, &$error='') {
-        if (!preg_match('/^[^=\+@-].*$/s', $text))
+        if (!preg_match('/(^[^=\+@-].*$)|(^\+\d+$)/s', $text))
             $error = __('Content cannot start with the following characters: = - + @');
         return $error == '';
     }
@@ -340,7 +344,7 @@ class Validator {
         return true;
     }
 
-    function process($fields,$vars,&$errors){
+    static function process($fields,$vars,&$errors){
 
         $val = new Validator();
         $val->setFields($fields);
@@ -350,7 +354,7 @@ class Validator {
         return (!$errors);
     }
 
-    function check_acl($backend) {
+    static function check_acl($backend) {
         global $cfg;
 
         $acl = $cfg->getACL();

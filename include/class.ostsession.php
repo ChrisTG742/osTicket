@@ -71,7 +71,7 @@ class osTicketSession {
             $this->backend = new self::$backends['db']($this->ttl);
         }
 
-        if ($this->backend instanceof SessionBackend) {
+        if (!empty($this->id) && ($this->backend instanceof SessionBackend)) {
             // Set handlers.
             session_set_save_handler(
                 array($this->backend, 'open'),
@@ -239,7 +239,7 @@ extends SessionBackend {
     }
 
     function cleanup() {
-        self::gc(0);
+        $this->gc(0);
     }
 
     function gc($maxlife){

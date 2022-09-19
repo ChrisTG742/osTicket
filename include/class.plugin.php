@@ -103,7 +103,7 @@ class PluginConfig extends Config {
      * validation errors) prior to saving. Add an error to the errors list
      * or return boolean FALSE if the config commit should be aborted.
      */
-    function pre_save($config, &$errors) {
+    function pre_save(&$config, &$errors) {
         return true;
     }
 
@@ -171,9 +171,10 @@ class PluginManager {
             $info = static::getInfoForPath(
                 INCLUDE_DIR . $ht['install_path'], $ht['isphar']);
 
-            list($path, $class) = explode(':', $info['plugin']);
-            if (!$class)
-                $class = $path;
+            if (is_array($info) && isset($info['plugin']))
+                list($path, $class) = explode(':', $info['plugin']);
+            if (!isset($class))
+                $class = $path ?? null;
             elseif ($ht['isphar'])
                 @include_once('phar://' . INCLUDE_DIR . $ht['install_path']
                     . '/' . $path);
@@ -192,20 +193,14 @@ class PluginManager {
                     = new $class($ht['id']);
             }
             else {
-                // Get instance without calling the constructor. Thanks
-                // http://stackoverflow.com/a/2556089
-                $a = unserialize(
-                    sprintf(
-                        'O:%d:"%s":0:{}',
-                        strlen($class), $class
-                    )
-                );
+                $reflection = new ReflectionClass($class);
+                $a = $reflection->newInstanceWithoutConstructor();
                 // Simulate __construct() and load()
                 $a->id = $ht['id'];
                 $a->ht = $ht;
                 $a->info = $info;
                 static::$plugin_list[$ht['install_path']] = &$a;
-                unset($a);
+                unset($a,$reflection);
             }
         }
         return static::$plugin_list;
@@ -233,7 +228,7 @@ class PluginManager {
         return $plugins;
     }
 
-    function throwException($errno, $errstr) {
+    static function throwException($errno, $errstr) {
         throw new RuntimeException($errstr);
     }
 
@@ -250,7 +245,7 @@ class PluginManager {
      */
     static function allInfos() {
         foreach (glob(INCLUDE_DIR . 'plugins/*',
-                GLOB_NOSORT|GLOB_BRACE) as $p) {
+                GLOB_NOSORT) as $p) {
             $is_phar = false;
             if (substr($p, strlen($p) - 5) == '.phar'
                     && class_exists('Phar')
@@ -310,7 +305,7 @@ class PluginManager {
         return static::$plugin_info[$install_path];
     }
 
-    function getInstance($path) {
+    static function getInstance($path) {
         static $instances = array();
         if (!isset($instances[$path])
                 && ($ps = static::allInstalled())

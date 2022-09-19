@@ -89,13 +89,11 @@ class FilterAction extends VerySimpleModel {
         return $this->_impl;
     }
 
-    function setFilterFlags($actions=false, $flag, $bool) {
+    static function setFilterFlags(?object $actions=null, $flag, $bool) {
         $flag = constant($flag);
-        if ($actions) {
+        if ($actions)
             foreach ($actions as $action)
                 $action->setFilterFlag($flag, $bool);
-        } else
-            $this->setFilterFlag($flag, $bool);
     }
 
     function setFilterFlag($flag, $bool) {
@@ -653,10 +651,9 @@ class FA_SendEmail extends TriggerAction {
         ));
         $to = $replacer->replaceVars($config['recipients']);
 
-        require_once PEAR_DIR . 'Mail/RFC822.php';
         require_once PEAR_DIR . 'PEAR.php';
 
-        if (!($mails = Mail_RFC822::parseAddressList($to)) || PEAR::isError($mails))
+        if (!($mails = Mail_Parse::parseAddressList($to)) || PEAR::isError($mails))
             return false;
 
         // Allow %{recipient} in the body
@@ -695,7 +692,7 @@ class FA_SendEmail extends TriggerAction {
                     'size' => 80, 'length' => 1000,
                 ),
                 'validators' => function($self, $value) {
-                    if (!($mails = Mail_RFC822::parseAddressList($value)) || PEAR::isError($mails))
+                    if (!($mails = Mail_Parse::parseAddressList($value)) || PEAR::isError($mails))
                         $self->addError('Unable to parse address list. '
                             .'Use commas to separate addresses.');
 

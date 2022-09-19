@@ -175,7 +175,7 @@ class Mailer {
             $utype = 'M';
             break;
         default:
-            $utype = $options['utype'] ?: is_array($recipient) ? 'M' : '?';
+            $utype = ($options['utype'] ?: is_array($recipient)) ? 'M' : '?';
         }
 
 
@@ -516,11 +516,19 @@ class Mailer {
                         $file = AttachmentFile::lookup($match[1]);
                     if (!$file)
                         return $match[0];
-                    $mime->addHTMLImage($file->getData(),
-                        $file->getMimeType(), $file->getName(), false,
-                        $match[1].$domain);
-                    // Don't re-attach the image below
-                    unset($self->attachments[$file->getId()]);
+                    try {
+                        $mime->addHTMLImage($file->getData(),
+                            $file->getMimeType(), $file->getName(), false,
+                            $match[1].$domain);
+                        // Don't re-attach the image below
+                        unset($self->attachments[$file->getId()]);
+                    } catch (Exception $e) {
+                        $alert=_S("Unable to retrieve email inline image ")
+                                .sprintf(":%1\$s\n\n%2\$s\n",
+                                $match[1].$domain, $e->getMessage());
+                        $self->logWarning($alert);
+                        return $match[0];
+                    }
                     return $match[0].$domain;
                 }, $message);
             // Add an HTML body
@@ -621,12 +629,15 @@ class Mailer {
         //NOTE: Admin alert override - don't email when having email trouble!
         $ost->logError(_S('Mailer Error'), $error, false);
     }
-
+    function logWarning($warn) {
+        global $ost;
+        $ost->logWarning(_S('Mailer Error'), $warn, false);
+    }
     /******* Static functions ************/
 
     //Emails using native php mail function - if DB connection doesn't exist.
     //Don't use this function if you can help it.
-    function sendmail($to, $subject, $message, $from, $options=null) {
+    static function sendmail($to, $subject, $message, $from, $options=null) {
         $mailer = new Mailer(null, array('notice'=>true, 'nobounce'=>true));
         $mailer->setFromAddress($from);
         return $mailer->send($to, $subject, $message, $options);
