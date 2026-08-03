@@ -25,6 +25,7 @@ class Form {
     var $options = array();
     var $fields = array();
     var $title = '';
+    var $notice = '';
     var $instructions = '';
 
     var $validators = array();
@@ -39,6 +40,8 @@ class Form {
             $this->title = $options['title'];
         if (isset($options['instructions']))
             $this->instructions = $options['instructions'];
+        if (isset($options['notice']))
+            $this->notice = $options['notice'];
         if (isset($options['id']))
             $this->id = $options['id'];
 
@@ -51,6 +54,10 @@ class Form {
     }
     function setId($id) {
         $this->id = $id;
+    }
+
+    function setNotice($notice) {
+        $this->notice = $notice;
     }
 
     function data($source) {
@@ -112,6 +119,7 @@ class Form {
     }
 
     function getTitle() { return $this->title; }
+    function getNotice() { return $this->notice; }
     function getInstructions() { return Format::htmldecode($this->instructions); }
     function getSource() { return $this->_source; }
     function setSource($source) { $this->_source = $source; }
@@ -159,30 +167,54 @@ class Form {
         }
         return $this->_clean;
     }
+    /*
+     * Transform form data to database ready clean data.
+     *
+     */
+    function to_db($clean=null, $validate=true) {
+        if (!$clean
+                && !$this->isValid()
+                && !($clean=$this->getClean($validate)))
+            return false;
+        $data = [];
+        foreach ($clean as $name => $val) {
+            if (!($f = $this->getField($name)))
+                continue;
+            try {
+                $data[$name] = $f->to_database($val);
+            } catch (FieldUnchanged $e) {
+                // Unset field if it's unchanged...mainly
+                // useful for Secret/PasswordField
+                unset($data[$name]);
+            }
+        }
+        return $data;
+    }
 
     /*
      * Process the form input and return clean data.
      *
-     * It's similar to getClean but forms downstream can use it to return
-     * database ready data.
+     * It's similar to to_db but forms downstream can use it to skip or add
+     * extra validations
+
      */
     function process($validate=true) {
-        return $this->getClean($validate);
+        return $this->to_db($validate);
     }
+
 
     function errors($formOnly=false) {
         return ($formOnly) ? $this->_errors['form'] : $this->_errors;
     }
 
     function addError($message, $index=false) {
-
         if ($index)
             $this->_errors[$index] = $message;
         else
             $this->_errors['form'][] = $message;
     }
 
-    function addErrors($errors=array()) {
+    function addErrors($errors=[]) {
         foreach ($errors as $k => $v) {
             if (($f=$this->getField($k)))
                 $f->addError($v);
@@ -202,6 +234,9 @@ class Form {
             $this->title = $options['title'];
         if (isset($options['instructions']))
             $this->instructions = $options['instructions'];
+        if (isset($options['notice']))
+            $this->notice = $options['notice'];
+
         $form = $this;
         $template = $options['template'] ?: 'dynamic-form.tmpl.php';
         if (isset($options['staff']) && $options['staff'])
@@ -434,9 +469,14 @@ implements FormRenderer {
 ?>
       <table class="<?php echo 'grid form' ?>">
           <caption><?php echo Format::htmlchars($this->title ?: $form->getTitle()); ?>
-                  <div><small><?php echo Format::viewableImages($form->getInstructions()); ?></small></div>
-          </caption>
-          <tbody><tr><?php for ($i=0; $i<12; $i++) echo '<td style="width:8.3333%"/>'; ?></tr></tbody>
+            <div><small><?php echo Format::viewableImages($form->getInstructions()); ?></small></div>
+            <?php
+            if ($form->getNotice())
+                echo sprintf('<div><small><p id="msg_warning">%s</p></small></div>',
+                        Format::htmlchars($form->getNotice()));
+            ?>
+        </caption>
+        <tbody><tr><?php for ($i=0; $i<12; $i++) echo '<td style="width:8.3333%"/>'; ?></tr></tbody>
 <?php
       $row_size = 12;
       $cols = $row = 0;
@@ -677,6 +717,12 @@ class FormField {
     function errors() {
         return $this->_errors;
     }
+
+    function resetErrors() {
+        $this->_errors = [];
+        return !($this->_errors);
+    }
+
     function addError($message, $index=false) {
         if ($index)
             $this->_errors[$index] = $message;
@@ -1495,7 +1541,7 @@ class TextboxField extends FormField {
                 function($v) use ($config) {
                     $regex = $config['regex'];
                     return @preg_match($regex, $v);
-                }, __('Value does not match required pattern')
+                }, $config['validator-error'] ?? __('Value does not match required pattern')
             ),
         );
         // Support configuration forms, as well as GUI-based form fields
@@ -1539,6 +1585,15 @@ class PasswordField extends TextboxField {
             $this->set('validator', 'password');
     }
 
+    protected function getMasterKey() {
+        return SECRET_SALT;
+    }
+
+    protected function getSubKey() {
+        $config = $this->getConfiguration();
+        return $config['key'] ?: 'pwfield';
+    }
+
     function parse($value) {
         // Don't trim the value
         return $value;
@@ -1548,11 +1603,13 @@ class PasswordField extends TextboxField {
         // If not set in UI, don't save the empty value
         if (!$value)
             throw new FieldUnchanged();
-        return Crypto::encrypt($value, SECRET_SALT, 'pwfield');
+        return Crypto::encrypt($value, $this->getMasterKey(),
+                $this->getSubKey());
     }
 
     function to_php($value) {
-        return Crypto::decrypt($value, SECRET_SALT, 'pwfield');
+        return Crypto::decrypt($value, $this->getMasterKey(),
+                $this->getSubKey());
     }
 }
 
@@ -1732,6 +1789,10 @@ class BooleanField extends FormField {
         return ($value) ? __('Yes') : __('No');
     }
 
+    function asVar($value, $id=false) {
+        return $this->toString($value);
+    }
+
     function getClean($validate=true) {
         if (!isset($this->_clean)) {
             $this->_clean = (isset($this->value))
@@ -1806,7 +1867,10 @@ class ChoiceField extends FormField {
                 'id'=>1, 'label'=>__('Choices'), 'required'=>false, 'default'=>'',
                 'hint'=>__('List choices, one per line. To protect against spelling changes, specify key:value names to preserve entries if the list item names change.</br><b>Note:</b> If you have more than two choices, use a List instead.'),
                 'validator'=>'choices',
-                'configuration'=>array('html'=>false)
+                'configuration'=>array(
+                    'html' => false,
+                    'disabled' => false,
+                    )
             )),
             'default' => new TextboxField(array(
                 'id'=>3, 'label'=>__('Default'), 'required'=>false, 'default'=>'',
@@ -2025,7 +2089,7 @@ class ChoiceField extends FormField {
         $name = $name ?: $this->get('name');
         $val = $value;
         if ($value && is_array($value))
-            $val = '"?'.implode('("|,|$)|"?', array_keys($value)).'("|,|$)';
+            $val = '"?(?<![0-9])'.implode('("|,|$)|"?(?<![0-9])', array_keys($value)).'("|,|$)';
         switch ($method) {
         case '!includes':
             return Q::not(array("{$name}__regex" => $val));
@@ -2505,26 +2569,26 @@ class DatetimeField extends FormField {
                 "{$name}__lte" =>  $right->format('Y-m-d H:i:s'),
             ));
         case 'ndaysago':
-            $int = $intervals[$value['int'] ?: 'd'] ?: 'DAY';
+            $int = $intervals[(string) $value['int'] ?: 'd'] ?: 'DAY';
             $interval = new SqlInterval($int, $value['until']);
             return new Q(array(
                 "{$name}__range" => array($now->minus($interval), $now),
             ));
         case 'ndays':
-            $int = $intervals[$value['int'] ?: 'd'] ?: 'DAY';
+            $int = $intervals[(string) $value['int'] ?: 'd'] ?: 'DAY';
             $interval = new SqlInterval($int, $value['until']);
             return new Q(array(
                 "{$name}__range" => array($now, $now->plus($interval)),
             ));
         // Distant past and future ranges
         case 'distpast':
-            $int = $intervals[$value['int'] ?: 'd'] ?: 'DAY';
+            $int = $intervals[(string) $value['int'] ?: 'd'] ?: 'DAY';
             $interval = new SqlInterval($int, $value['until']);
             return new Q(array(
                 "{$name}__lte" => $now->minus($interval),
             ));
         case 'distfut':
-            $int = $intervals[$value['int'] ?: 'd'] ?: 'DAY';
+            $int = $intervals[(string) $value['int'] ?: 'd'] ?: 'DAY';
             $interval = new SqlInterval($int, $value['until']);
             return new Q(array(
                 "{$name}__gte" => $now->plus($interval),
@@ -2700,6 +2764,14 @@ class SectionBreakField extends FormField {
 
     function isBlockLevel() {
         return true;
+    }
+
+    function isEditableToStaff() {
+        return $this->isVisibleToStaff();
+    }
+
+    function isEditableToUsers() {
+        return $this->isVisibleToUsers();
     }
 }
 
@@ -3264,7 +3336,7 @@ class DepartmentField extends ChoiceField {
 
     function getValue() {
          if (($value = parent::getValue()) && ($id=$this->getClean()))
-            return $value[$id];
+            return is_array($value) ? $value[$id] : $value;
      }
 
     function to_php($value, $id=false) {
@@ -3808,6 +3880,10 @@ class FileUploadField extends FormField {
                 'hint'=>__('Optionally, enter comma-separated list of additional file types, by extension. (e.g .doc, .pdf).'),
                 'configuration'=>array('html'=>false, 'rows'=>2),
             )),
+            'strictmimecheck' => new BooleanField([
+                'id' => 4, 'label'=>__('Strict Mime Type Check'), 'required' => false, 'default' => false,
+                'hint' => 'File Mime Type associations is OS dependent',
+                'configuration' => ['desc' => __('Enable strict Mime Type check')]]),
             'max' => new TextboxField(array(
                 'label'=>__('Maximum Files'),
                 'hint'=>__('Users cannot upload more than this many files.'),
@@ -3832,8 +3908,9 @@ class FileUploadField extends FormField {
             Http::response(400, 'Send one file at a time');
         $file = array_shift($files);
         $file['name'] = urldecode($file['name']);
+        $config = $this->getConfiguration();
 
-        if (!$this->isValidFile($file))
+        if (!self::isValidFile($file, $config['strictmimecheck']))
             Http::response(413, 'Invalid File');
 
         if (!$bypass && !$this->isValidFileType($file['name'], $file['type']))
@@ -3862,10 +3939,11 @@ class FileUploadField extends FormField {
         if (!$this->isValidFileType($file['name'], $file['type']))
             throw new FileUploadError(__('File type is not allowed'));
 
-        if (!$this->isValidFile($file))
+        $config = $this->getConfiguration();
+
+        if (!self::isValidFile($file, $config['strictmimecheck']))
              throw new FileUploadError(__('Invalid File'));
 
-        $config = $this->getConfiguration();
         if ($file['size'] > $config['size'])
             throw new FileUploadError(__('File size is too large'));
 
@@ -3902,13 +3980,25 @@ class FileUploadField extends FormField {
         return $F;
     }
 
-    function isValidFile($file) {
+    /**
+     * Strict mode can be enabled in Admin Panel > Settings > Tickets
+     *
+     * PS: Please note that the a mismatch can happen if the mime types
+     * database is not up to date or a little different compared to what the
+     * browser reports.
+     **/
+    static function isValidFile($file, $strict = false) {
+        // Strict mime check
+        if ($strict
+            && !empty($file['type'])
+            && FileObject::mimecmp($file['tmp_name'], $file['type']))
+            return false;
 
         // Check invalid image hacks
         if ($file['tmp_name']
                 && stripos($file['type'], 'image/') === 0
-                && function_exists('exif_imagetype')
-                && !exif_imagetype($file['tmp_name']))
+                && !(exif_imagetype($file['tmp_name'])
+                    || mime_content_type($file['tmp_name']) === 'image/svg+xml'))
             return false;
 
         return true;
@@ -3965,7 +4055,11 @@ class FileUploadField extends FormField {
     }
 
     function getConfiguration() {
+        global $cfg;
+
         $config = parent::getConfiguration();
+        // If no size present default to system setting
+        $config['size'] ??= $cfg->getMaxFileSize();
         $_types = self::getFileTypes();
         $mimetypes = array();
         $extensions = array();
@@ -4025,7 +4119,7 @@ class FileUploadField extends FormField {
         if (isset($this->attachments) && $this->attachments) {
             $this->attachments->keepOnlyFileIds($value);
         }
-        return JsonDataEncoder::encode($value);
+        return JsonDataEncoder::encode($value) ?? NULL;
     }
 
     function parse($value) {
@@ -4418,8 +4512,9 @@ class PasswordWidget extends TextboxWidget {
 
     function render($mode=false, $extra=false) {
         $extra = array();
-        if ($this->field->value) {
-            $extra['placeholder'] = '••••••••••••';
+        if (isset($this->field->value)) {
+            $extra['placeholder'] = str_repeat('•',
+                    strlen($this->field->value));
         }
         return parent::render($mode, $extra);
     }
@@ -4589,6 +4684,8 @@ class ChoicesWidget extends Widget {
                 echo ' data-'.$D.'="'.Format::htmlchars($V).'"';
             ?>
             data-placeholder="<?php echo Format::htmlchars($prompt); ?>"
+            <?php if ($config['disabled'])
+                echo ' disabled="disabled"'; ?>
             <?php if ($config['multiselect'])
                 echo ' multiple="multiple"'; ?>>
             <?php if ($showdefault || (!$have_def && !$config['multiselect'])) { ?>
@@ -5151,6 +5248,8 @@ class FileUploadWidget extends Widget {
     );
 
     function render($options=array()) {
+        global $ost;
+
         $config = $this->field->getConfiguration();
         $name = $this->field->getFormName();
         $id = substr(md5(spl_object_hash($this)), 10);
@@ -5214,7 +5313,7 @@ class FileUploadWidget extends Widget {
         // Get Form Type
         $type = $this->field->getForm()->type;
         // Determine if for Ticket/Task/Custom
-        if ($type) {
+        if ($type && !is_numeric($field_id)) {
             if ($type == 'T')
                 $field_id = 'ticket/attach';
             elseif ($type == 'A')
@@ -5236,6 +5335,7 @@ class FileUploadWidget extends Widget {
           url: 'ajax.php/form/upload/<?php echo $field_id; ?>',
           link: $('#<?php echo $id; ?>').find('a.manual'),
           paramname: 'upload[]',
+          data: {"__CSRFToken__": "<?php echo $ost->getCSRF()->getToken(); ?>"},
           fallback_id: 'file-<?php echo $id; ?>',
           allowedfileextensions: <?php echo JsonDataEncoder::encode(
             $config['__extensions'] ?: array()); ?>,
@@ -5336,6 +5436,14 @@ class FreeTextField extends FormField {
 
     function isBlockLevel() {
         return true;
+    }
+
+    function isEditableToStaff() {
+        return $this->isVisibleToStaff();
+    }
+
+    function isEditableToUsers() {
+        return $this->isVisibleToUsers();
     }
 
     /* utils */
@@ -6036,7 +6144,7 @@ class TransferForm extends Form {
             'refer' => new BooleanField(array(
                 'id'=>2, 'label'=>'', 'required'=>false, 'default'=>false,
                 'configuration'=>array(
-                    'desc' => 'Maintain referral access to current department')
+                    'desc' => __('Maintain referral access to current department'))
             )),
             'comments' => new TextareaField(array(
                     'id' => 3,
@@ -6078,7 +6186,7 @@ class TransferForm extends Form {
             break;
         default:
             throw new Exception(sprintf(__('%s: Unknown template style %s'),
-                        get_class(), $options['template']));
+                        get_class($this), $options['template']));
         }
 
         $form = $this;

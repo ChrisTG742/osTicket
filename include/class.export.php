@@ -259,7 +259,7 @@ class Export {
 
         // Filename or stream to export agents to
         $filename = $filename ?: sprintf('Agents-%s.csv',
-                strftime('%Y%m%d'));
+                date('Ymd'));
         Http::download($filename, "text/$how");
         $depts = Dept::getDepartments(null, true, Dept::DISPLAY_DISABLED);
         echo self::dumpQuery($agents, array(
@@ -296,7 +296,7 @@ static function departmentMembers($dept, $agents, $filename='', $how='csv') {
 
     // Filename or stream to export depts' agents to
     $filename = $filename ?: sprintf('%s-%s.csv', $dept->getName(),
-            strftime('%Y%m%d'));
+            date('Ymd'));
     Http::download($filename, "text/$how");
     echo self::dumpQuery($agents, array(
                 '::getName'  =>  'Name',
@@ -322,7 +322,7 @@ static function departmentMembers($dept, $agents, $filename='', $how='csv') {
     exit;
   }
 
-  static function audits($type, ?string $filename=null, ?string $tableInfo=null, ?string $object=null, ?string $how='csv', ?bool $show_viewed=true, ?array $data=array(), CsvExporter $exporter) {
+  static function audits($type, ?string $filename, ?string $tableInfo, ?string $object, ?string $how='csv', ?bool $show_viewed=true, ?array $data=array(), CsvExporter $exporter) {
       $headings = array('Description', 'Timestamp', 'IP');
       switch ($type) {
           case 'audit':
@@ -535,7 +535,7 @@ abstract class  Exporter {
                 || !($email=$cfg->getDefaultEmail()))
             return false;
 
-        $mailer = new Mailer($email);
+        $mailer = new osTicket\Mail\Mailer($email);
         $mailer->addFileObject($file);
         $subject = __("Export");
         $body = __("Attached is file containing the export you asked us to send you!");
@@ -620,7 +620,7 @@ class CsvExporter extends Exporter {
     }
 
     function write($data) {
-        fputcsv($this->fp, $this->escape($data), $this->getDelimiter());
+        fputcsv($this->fp, $this->escape($data), $this->getDelimiter(), "\"", "");
     }
 
 }
@@ -725,7 +725,7 @@ class CsvResultsExporter extends ResultSetExporter {
         $delimiter = $this->getDelimiter();
         // Output a UTF-8 BOM (byte order mark)
         fputs($this->output, chr(0xEF) . chr(0xBB) . chr(0xBF));
-        fputcsv($this->output, $this->getHeaders(), $delimiter);
+        fputcsv($this->output, $this->getHeaders(), $delimiter, "\"", "");
         while ($row=$this->next())
             fputcsv($this->output, array_map(
                 function($v){
@@ -733,7 +733,7 @@ class CsvResultsExporter extends ResultSetExporter {
                         return "'".$v;
                     return $v;
                 }, $row),
-            $delimiter);
+            $delimiter, "\"", "");
 
         if (!$tmp)
             fclose($this->output);

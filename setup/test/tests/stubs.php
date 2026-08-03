@@ -12,6 +12,7 @@ class mysqli {
     function set_charset() {}
     function autocommit() {}
     function rollback() {}
+    function ping() {}
 }
 
 class mysqli_stmt {
@@ -188,6 +189,10 @@ class Collator {
     function compare() {}
 }
 
+class Aws {
+    function createRoute53() {}
+}
+
 class Aws_Route53_Client {
     function changeResourceRecordSets() {}
 }
@@ -243,6 +248,7 @@ class HashPassword {
 
 class SplFileObject {
     function fseek() {}
+    function getRealPath() {}
 }
 
 class AuditEntry {
@@ -250,4 +256,30 @@ class AuditEntry {
     static function getTableInfo() {}
 }
 
+class Smtp {
+    function _expect() {}
+    function _send() {}
+}
+
+class Imap {
+    function setFlags() {}
+}
+
+class Message {
+    function setSubject() {}
+    function isMultiPart() {}
+}
+
+class MailBoxProtocolTrait {
+    function sendRequest() {}
+}
+
+class MailBoxStorageTrait {
+    function selectFolder() {}
+    function countMessages() {}
+    function getRawHeader() {}
+    function getRawContent() {}
+    function moveMessage() {}
+    function removeMessage() {}
+}
 ?>

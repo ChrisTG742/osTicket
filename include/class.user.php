@@ -220,7 +220,11 @@ implements TemplateVariable, Searchable {
     static function fromVars($vars, $create=true, $update=false) {
         // Try and lookup by email address
         $user = static::lookupByEmail($vars['email']);
-        if (!$user && $create) {
+        if (!$user
+                // can create user?
+                && $create
+                // Make sure at least email is valid
+                && Validator::is_email($vars['email'])) {
             $name = $vars['name'];
             if (is_array($name))
                 $name = implode(', ', $name);
@@ -228,7 +232,7 @@ implements TemplateVariable, Searchable {
                 list($name) = explode('@', $vars['email'], 2);
 
             $user = new User(array(
-                'name' => Format::htmldecode(Format::sanitize($name, false)),
+                'name' => trim(Format::htmldecode(Format::sanitize($name, false))),
                 'created' => new SqlFunction('NOW'),
                 'updated' => new SqlFunction('NOW'),
                 //XXX: Do plain create once the cause
@@ -254,8 +258,7 @@ implements TemplateVariable, Searchable {
             $type = array('type' => 'created');
             Signal::send('object.created', $user, $type);
             Signal::send('user.created', $user);
-        }
-        elseif ($update) {
+        } elseif ($update && $user) {
             $errors = array();
             $user->updateInfo($vars, $errors, true);
         }
@@ -586,7 +589,7 @@ implements TemplateVariable, Searchable {
                         $type = array('type' => 'edited', 'key' => 'Name');
                         Signal::send('object.edited', $this, $type);
                     }
-                    $this->name = $name;
+                    $this->name = trim($name);
                 }
 
                 // Email address field
@@ -737,6 +740,8 @@ implements TemplateVariable {
             $this->address = sprintf('"%s" <%s>',
                     $this->getName(),
                     $this->email);
+        else
+             $this->address =  $this->email;
     }
 
     function __toString() {
@@ -745,7 +750,7 @@ implements TemplateVariable {
 
     function getVar($what) {
 
-        if (!$this->_info)
+        if (!isset($this->_info))
             return '';
 
         switch ($what) {
@@ -760,7 +765,11 @@ implements TemplateVariable {
     }
 
     function getAddress() {
-        return $this->address ?: $this->email;
+        return $this->address ?: $this->getEmail();
+    }
+
+    function getEmail() {
+        return $this->email;
     }
 
     function getHost() {
@@ -1320,7 +1329,7 @@ class UserAccount extends VerySimpleModel {
         }
 
         $this->set('timezone', $vars['timezone']);
-        $this->set('username', $vars['username']);
+        $this->set('username', Format::sanitize($vars['username']));
 
         if ($vars['passwd1']) {
             $this->setPassword($vars['passwd1']);
@@ -1398,7 +1407,7 @@ class UserAccount extends VerySimpleModel {
         ));
 
         if ($vars['username'] && strcasecmp($vars['username'], $user->getEmail()))
-            $account->set('username', $vars['username']);
+            $account->set('username', Format::sanitize($vars['username']));
 
         if ($vars['passwd1'] && !$vars['sendemail']) {
             $account->set('passwd', Passwd::hash($vars['passwd1']));

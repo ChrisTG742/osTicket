@@ -45,9 +45,8 @@ if ($cfg->isAuthRequiredForFiles()
         ) {
 
     // Try and determine if an agent is viewing the page / file
-    if (strpos($_SERVER['HTTP_REFERRER'], ROOT_PATH .  'scp/') !== false) {
-        $_SESSION['_staff']['auth']['dest'] =
-            '/' . ltrim($_SERVER['REQUEST_URI'], '/');
+    if (strpos($_SERVER['HTTP_REFERER'], ROOT_PATH .  'scp/') !== false) {
+        $_SESSION['_staff']['auth']['dest'] = Http::refresh_url();
         Http::redirect(ROOT_PATH.'scp/login.php');
     } else {
         require 'secure.inc.php';
@@ -59,7 +58,7 @@ if ($cfg->isAuthRequiredForFiles()
 // and the user has access to the parent ticket!!
 if ($file->verifySignature($_GET['signature'], $_GET['expires'])) {
     try {
-        if (($s = @$_GET['s']) && strpos($file->getType(), 'image/') === 0)
+        if (($s = @$_GET['s']) && $file->isInlineSafeImage())
             return $file->display($s);
 
         // Download the file..
@@ -68,7 +67,8 @@ if ($file->verifySignature($_GET['signature'], $_GET['expires'])) {
         $file->download($filename, $disposition, @$_GET['expires']);
     }
     catch (Exception $ex) {
-        Http::response(500, 'Unable to find that file: '.$ex->getMessage());
+        $ost->logError(__('File download error'), $ex->getMessage());
+        Http::response(500, __('Unable to retrieve the requested file'));
     }
 }
 // else

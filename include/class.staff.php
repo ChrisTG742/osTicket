@@ -330,6 +330,15 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
         return $this->email;
     }
 
+    function getEmailAddress() {
+        $emailaddr =  (string) $this->getEmail();
+        if (($name=$this->getName()))
+            $emailaddr = sprintf('"%s" <%s>',
+                    (string) $name,
+                    $emailaddr);
+        return $emailaddr;
+    }
+
     function getAvatar($size=null) {
         global $cfg;
         $source = $cfg->getStaffAvatarSource();
@@ -704,7 +713,7 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
                 'child_thread__referrals__team__team_id__in' => $teams)));
             $assigned->add($childRefTeam);
         }
-        $visibility = Q::any(new Q(array('status__state'=>'open', $assigned)));
+        $visibility = Q::any(new Q(array('status__state__in'=>['open', 'closed'], $assigned)));
         // -- If access is limited to assigned only, return assigned
         if ($this->isAccessLimited())
             return $visibility;
@@ -729,7 +738,7 @@ implements AuthenticatedUser, EmailContact, TemplateVariable, Searchable {
     }
 
     function applyVisibility($query, $exclude_archived=false) {
-        return $query->filter($this->getTicketsVisibility($exclude_archived));
+        return $query->filter($this->getTicketsVisibility($exclude_archived))->distinct('ticket_id');
     }
 
     function applyDeptVisibility($qs) {
@@ -1494,6 +1503,7 @@ extends AbstractForm {
                 'required' => true,
                 'configuration' => array(
                     'classes' => 'span12',
+                    'length' => '128',
                 ),
                 'visibility' => new VisibilityConstraint(
                     new Q(array('welcome_email' => false)),
@@ -1513,6 +1523,7 @@ extends AbstractForm {
                 'required' => true,
                 'configuration' => array(
                     'classes' => 'span12',
+                    'length' => '128',
                 ),
                 'visibility' => new VisibilityConstraint(
                     new Q(array('welcome_email' => false)),
@@ -1556,6 +1567,7 @@ extends AbstractForm {
                 'required' => true,
                 'configuration' => array(
                     'autofocus' => true,
+                    'length' => '128',
                 ),
                 'validator' => 'noop',
             )),
@@ -1563,6 +1575,9 @@ extends AbstractForm {
                 'label' => __('Enter a new password'),
                 'placeholder' => __('New Password'),
                 'required' => true,
+                'configuration' => array(
+                    'length' => '128',
+                ),
                 'validator' => '',
                 'validators' => function($self, $v) {
                     try {
@@ -1575,6 +1590,9 @@ extends AbstractForm {
             'passwd2' => new PasswordField(array(
                 'placeholder' => __('Confirm Password'),
                 'required' => true,
+                'configuration' => array(
+                    'length' => '128',
+                ),
                 'validator' => '',
                 'validators' => function($self, $v) {
                     try {

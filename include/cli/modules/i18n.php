@@ -53,10 +53,10 @@ class i18n_Compiler extends Module {
         profile in your home folder or in your environment. See AWS
         configuration  docs for more information";
 
-    static $project = 'osticket-official';
-    static $crowdin_api_url = 'http://i18n.osticket.com/api/project/{project}/{command}';
+    static $project_id = '25755';
+    static $crowdin_api_url = 'http://i18n.osticket.com/api/v2/projects/{project_id}/{command}';
 
-    function _http_get($url) {
+    function _http_get($url, $headers=[], $fields=[]) {
         $this->stdout->write(">>> Downloading $url\n");
         #curl post
         $ch = curl_init();
@@ -65,6 +65,15 @@ class i18n_Compiler extends Module {
         curl_setopt($ch, CURLOPT_HEADER, FALSE);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, FALSE);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+        $headers[] = 'Cache-Control: no-cache';
+        // Set POST data
+        if (!empty($fields)) {
+            $headers[] = 'Content-Type: application/json';
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($fields));
+        }
+        // Set headers
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         $result=curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
@@ -72,18 +81,18 @@ class i18n_Compiler extends Module {
         return array($code, $result);
     }
 
-    function _request($command, $args=array()) {
-
-        $url = str_replace(array('{command}', '{project}'),
-            array($command, self::$project),
+    function _request($command, $args=array(), $fields=[]) {
+        $url = str_replace(array('{command}', '{project_id}'),
+            array($command, self::$project_id),
             self::$crowdin_api_url);
 
-        $args += array('key' => $this->key);
-        if ($branch = $this->getOption('branch', false))
-            $args += array('branch' => $branch);
-        $url .= '?' . Http::build_query($args);
+        // Set Personal Access Token for every request
+        $headers = ['Authorization: Bearer '.$this->key];
+        // Build URL with arguments
+        if (!empty($args))
+            $url .= '?' . Http::build_query($args);
 
-        return $this->_http_get($url);
+        return $this->_http_get($url, $headers, $fields);
     }
 
     function run($args, $options) {
@@ -128,20 +137,23 @@ class i18n_Compiler extends Module {
 
     function _list() {
         error_reporting(E_ALL);
-        list($code, $body) = $this->_request('status');
-        $d = new DOMDocument();
-        $d->loadXML($body);
+        // Get languages progress
+        list($code, $body) = $this->_request('languages/progress', ['limit' => 300]);
+        // Fail if not successful
+        if ($code !== 200)
+            $this->fail("Request failed ({$code}): ".JsonDataParser::parse($body)['error']['message']."\n");
 
-        $xp = new DOMXpath($d);
-        foreach ($xp->query('//language') as $c) {
+        // Parse response to get data
+        $langs = JsonDataParser::parse($body)['data'];
+        foreach ($langs as $lang) {
             $name = $code = '';
-            foreach ($c->childNodes as $n) {
-                switch (strtolower($n->nodeName)) {
+            foreach ($lang['data']['language'] as $n=>$v) {
+                switch (strtolower($n)) {
                 case 'name':
-                    $name = $n->textContent;
+                    $name = $v;
                     break;
-                case 'code':
-                    $code = $n->textContent;
+                case 'id':
+                    $code = $v;
                     break;
                 }
             }
@@ -152,8 +164,34 @@ class i18n_Compiler extends Module {
     }
 
     function _build($lang, $options) {
-        list($code, $zip) = $this->_request("download/$lang.zip");
+        // Set target language
+        $fields = ['targetLanguageIds' => [$lang]];
+        // Set branch ID from branch name
+        if ($branch = $this->getOption('branch', false))
+            $fields['branchId'] = $this->getBranchId($branch);
+        // List available builds for language
+        list($code, $result) = $this->_request("translations/builds", [], $fields);
+        // Parse response and return build ID
+        // Fail if no build ID as it's required
+        if ($code !== 201 || !($build_id = JsonDataParser::parse($result)['data']['id']))
+            $this->fail("No builds available for target language");
+        $progress = 0;
+        while ($progress<100) {
+            sleep(2);
+            list ($c, $r) = $this->_request("translations/builds/{$build_id}");
+            if ($c !== 200)
+                $this->fail("No builds available for target language");
+            $progress = (int) JsonDataParser::parse($r)['data']['progress'];
+        }
+        // Request the download information
+        list($code, $body) = $this->_request("translations/builds/{$build_id}/download");
+        // Parse response and return download URL - fail if none
+        if (!($url = JsonDataParser::parse($body)['data']['url']))
+            $this->fail('Selected build not available for target language');
+        // Download using the URL in the response
+        list($code, $zip) = $this->_http_get($url);
 
+        // Fail if not successful
         if ($code !== 200)
             $this->fail('Language is not available'."\n");
 
@@ -181,10 +219,6 @@ class i18n_Compiler extends Module {
             $branch = trim($options['branch'], '/') . '/';
         for ($i=0; $i<$zip->numFiles; $i++) {
             $info = $zip->statIndex($i);
-            if ($branch && strpos($info['name'], $branch) !== 0) {
-                // Skip files not part of the named branch
-                continue;
-            }
             $contents = $zip->getFromIndex($i);
             if (!$contents)
                 continue;
@@ -291,21 +325,21 @@ class i18n_Compiler extends Module {
         }
 
         // Include a manifest
-        include_once INCLUDE_DIR . 'class.mailfetch.php';
+        include_once INCLUDE_DIR . 'class.mailparse.php';
 
         $po_header = Mail_Parse::splitHeaders($mo['']);
         $info = array(
             'Build-Date' => date(DATE_RFC822),
-            'Phrases-Version' => $po_header['X-Osticket-Major-Version'],
+            'Phrases-Version' => $po_header['x-osticket-major-version'],
             'Build-Version' => trim(`git describe`),
             'Build-Major-Version' => MAJOR_VERSION,
-            'Language' => $po_header['Language'],
+            'Language' => $po_header['language'],
             #'Phrases' =>
             #'Translated' =>
             #'Approved' =>
             'Id' => 'lang:' . $lang,
-            'Last-Revision' => $po_header['PO-Revision-Date'],
-            'Version' => (int)(strtotime($po_header['PO-Revision-Date']) / 10000),
+            'Last-Revision' => $po_header['po-revision-date'],
+            'Version' => (int)(strtotime($po_header['po-revision-date']) / 10000),
         );
         $phar->addFromString(
             'MANIFEST.php',
@@ -353,34 +387,42 @@ class i18n_Compiler extends Module {
                 $this->fail('Unable to include AWS phar file. Download to INCLUDE_DIR');
             require_once INCLUDE_DIR . 'aws.phar';
 
-            $aws = Aws\Common\Aws::factory(array());
-            $client = $aws->get('Route53');
+            // Services only available via global endpoints (eg. Route 53)
+            // must be instantiated with 'us-east-1'
+            $aws = new Aws\Sdk([
+                'region' => 'us-east-1',
+                'version' => '2013-04-01',
+                'credentials' => [
+                    'key' => getenv('AWS_ACCESS_KEY_ID'),
+                    'secret' => getenv('AWS_SECRET_ACCESS_KEY')
+                ]
+            ]);
+            $client = $aws->createRoute53();
 
             try {
-            $resp = $client->changeResourceRecordSets(array(
-                'HostedZoneId' => $options['dns'],
-                'ChangeBatch' => array(
-                    'Changes' => array(
-                        array(
-                            'Action' => 'CREATE',
-                            'ResourceRecordSet' => array(
-                                'Name' => "{$signature['hash']}.updates.osticket.com.",
-                                'Type' => 'TXT',
-                                'TTL' => 172800,
-                                'ResourceRecords' => array(
-                                    array(
-                                        'Value' => $seal,
+                $resp = $client->changeResourceRecordSets(array(
+                    'HostedZoneId' => $options['dns'],
+                    'ChangeBatch' => array(
+                        'Changes' => array(
+                            array(
+                                'Action' => 'CREATE',
+                                'ResourceRecordSet' => array(
+                                    'Name' => "{$signature['hash']}.updates.osticket.com.",
+                                    'Type' => 'TXT',
+                                    'TTL' => 172800,
+                                    'ResourceRecords' => array(
+                                        array(
+                                            'Value' => $seal,
+                                        ),
                                     ),
                                 ),
                             ),
                         ),
                     ),
-                ),
-            ));
-            $this->stdout->write(sprintf('%s: %s', $resp['ChangeInfo']['Comment'],
-                $resp['ChangeInfo']['Status']));
-            }
-            catch (Exception $ex) {
+                ));
+                $this->stdout->write(sprintf('%s: %s', $resp['ChangeInfo']['Comment'],
+                    $resp['ChangeInfo']['Status']));
+            } catch (Exception $ex) {
                 $this->stdout->write("Seal: $seal\n");
                 $this->fail('!! AWS Update Failed: '.$ex->getMessage());
             }
@@ -390,10 +432,11 @@ class i18n_Compiler extends Module {
         }
     }
 
-    function __read_next_string($tokens) {
+    function __read_next_string(&$tokens) {
         $string = array();
 
-        foreach ($tokens as $x=>$T) {
+        while ($T = current($tokens)) {
+            next($tokens);
             switch ($T[0]) {
                 case T_CONSTANT_ENCAPSED_STRING:
                     // Strip leading and trailing ' and " chars
@@ -431,7 +474,7 @@ class i18n_Compiler extends Module {
             }
         }
     }
-    function __read_args($tokens, $proto=false) {
+    function __read_args(&$tokens, $proto=false) {
         $args = array('forms'=>array());
         $arg = null;
         $proto = $proto ?: array('forms'=>1);
@@ -467,8 +510,9 @@ class i18n_Compiler extends Module {
         }
     }
 
-    function __get_func_args($tokens, $args) {
-        foreach ($tokens as $x=>$T) {
+    function __get_func_args(&$tokens, $args) {
+        while ($T = current($tokens)) {
+            next($tokens);
             switch ($T[0]) {
             case T_WHITESPACE:
                 continue 2;
@@ -480,10 +524,11 @@ class i18n_Compiler extends Module {
             }
         }
     }
-    function __find_strings($tokens, $funcs, $parens=0) {
+    function __find_strings(&$tokens, $funcs, $parens=0) {
         $T_funcs = array();
         $funcdef = false;
-        foreach ($tokens as $x=>$T) {
+        while ($T = current($tokens)) {
+            next($tokens);
             switch ($T[0]) {
             case T_STRING:
             case T_VARIABLE:
@@ -640,7 +685,7 @@ class i18n_Compiler extends Module {
         foreach ($files as $f) {
             $F = str_replace($root.'/', $domain, $f);
             $this->stderr->write("$F\n");
-            $tokens = new ArrayObject(token_get_all(fread(fopen($f, 'r'), filesize($f))));
+            $tokens = token_get_all(fread(fopen($f, 'r'), filesize($f)));
             foreach ($this->__find_strings($tokens, $funcs, 1) as $call) {
                 self::__addString($strings, $call, $F);
             }
@@ -713,7 +758,8 @@ class i18n_Compiler extends Module {
             preg_match_all('/(?:function\s+)?__\(\s*[^\'"]*(([\'"])(?:(?<!\\\\)\2|.)+\2)\s*[^)]*\)/',
                 $script, $calls, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
             foreach ($calls as $c) {
-                if (!($call = $this->__find_strings(token_get_all('<?php '.$c[0][0]), $funcs, 0)))
+                $tokens = token_get_all('<?php '.$c[0][0]);
+                if (!($call = $this->__find_strings($tokens, $funcs, 0)))
                     continue;
                 $call = $call[0];
 
@@ -724,6 +770,13 @@ class i18n_Compiler extends Module {
             }
         }
         return $strings;
+    }
+
+    function getBranchId($branch) {
+        list($code, $result) = $this->_request("branches", ['name' => (string) $branch]);
+        if ($code !== 200)
+            $this->fail('Branch not available');
+        return (int) JsonDataParser::parse($result)['data'][0]['data']['id'];
     }
 }
 

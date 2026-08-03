@@ -8,6 +8,7 @@ interface EmailContact {
     function getUserId();
     function getName();
     function getEmail();
+    function getEmailAddress();
 }
 
 
@@ -15,6 +16,7 @@ class EmailRecipient
 implements EmailContact {
     protected $contact;
     protected $type;
+    protected $address;
 
     function __construct(EmailContact $contact, $type='to') {
         $this->contact = $contact;
@@ -37,6 +39,16 @@ implements EmailContact {
         return $this->contact->getEmail();
     }
 
+    function getEmailAddress() {
+        if (!isset($this->address)) {
+            $this->address =  (string) $this->getEmail();
+            if (($name=$this->getName()))
+                $this->address = sprintf('"%s" <%s>',
+                        (string) $name, $this->address);
+        }
+        return $this->address;
+    }
+
     function getName() {
         return $this->contact->getName();
     }
@@ -44,6 +56,11 @@ implements EmailContact {
     function getType() {
         return $this->type;
     }
+
+    function __toString() {
+        return (string) $this->getEmailAddress();
+    }
+
 }
 
 abstract class BaseList
@@ -81,12 +98,12 @@ implements IteratorAggregate, Countable {
     }
 
     // IteratorAggregate
-    function getIterator() {
+    function getIterator(): Traversable {
         return new ArrayIterator($this->storage);
     }
 
     // Countable
-    function count($mode=COUNT_NORMAL) {
+    function count($mode=COUNT_NORMAL): int {
         return count($this->storage, $mode);
     }
 
@@ -178,7 +195,7 @@ implements ArrayAccess, Serializable {
     }
 
     // ArrayAccess
-    function offsetGet($offset) {
+    function offsetGet($offset): mixed {
         if (!is_int($offset))
             throw new InvalidArgumentException('List indices should be integers');
         elseif ($offset < 0)
@@ -187,10 +204,11 @@ implements ArrayAccess, Serializable {
             throw new OutOfBoundsException('List index out of range');
         return $this->storage[$offset];
     }
-    function offsetSet($offset, $value) {
-        if ($offset === null)
-            return $this->storage[] = $value;
-        elseif (!is_int($offset))
+    function offsetSet($offset, $value): void {
+        if ($offset === null) {
+            $this->storage[] = $value;
+            return;
+        } elseif (!is_int($offset))
             throw new InvalidArgumentException('List indices should be integers');
         elseif ($offset < 0)
             $offset += count($this->storage);
@@ -200,14 +218,14 @@ implements ArrayAccess, Serializable {
 
         $this->storage[$offset] = $value;
     }
-    function offsetExists($offset) {
+    function offsetExists($offset): bool {
         if (!is_int($offset))
             throw new InvalidArgumentException('List indices should be integers');
         elseif ($offset < 0)
             $offset += count($this->storage);
         return isset($this->storage[$offset]);
     }
-    function offsetUnset($offset) {
+    function offsetUnset($offset): void {
         if (!is_int($offset))
             throw new InvalidArgumentException('List indices should be integers');
         elseif ($offset < 0)
@@ -308,5 +326,63 @@ implements TemplateVariable {
             'emails' => __('List of email addresses'),
             'full' => __('List of names and email addresses'),
         );
+    }
+}
+
+
+
+
+/*
+ * ServiceRegistry
+ *
+ * An abscract class to implement basic functions and add ability to
+ * register service - collection of similar objects eng authentication
+ * backends.
+ *
+ * TODO: Consider using ListObject class - it's an overkill for now.
+ */
+abstract class  ServiceRegistry {
+    static protected $registry = array();
+
+    public function __isset($property) {
+        return isset($this->$property);
+    }
+
+    function getId() {
+        return static::$id;
+    }
+
+    /*
+     *  getBkId
+     *
+     *  Get service id used to register the service. Plugins adds a tag
+     *  making it possible to register multiple instances of the same
+     *  plugin.
+     *
+     */
+    function getBkId() {
+        $id = $this->getId();
+        // FIXME: Abstract getting backend id cleanly
+        if (isset($this->config)
+                && is_a($this->config, 'PluginConfig'))
+            $id =sprintf('%s.%s', $id, $this->config->getId());
+
+        return $id;
+    }
+
+    function getName() {
+        if (isset($this->config)
+                && is_a($this->config, 'PluginConfig'))
+             return $this->config->getName();
+
+        return static::$name;
+    }
+
+    static function register($obj) {
+         static::$registry[] = $obj;
+    }
+
+    static function getRegistry() {
+        return static::$registry;
     }
 }

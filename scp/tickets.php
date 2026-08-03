@@ -37,7 +37,7 @@ if(isset($_REQUEST['id']) || isset($_REQUEST['number'])) {
          $errors['err']=sprintf(__('%s: Unknown or invalid ID.'), __('ticket'));
     elseif($_REQUEST['number'] && !($ticket=Ticket::lookup(array('number' => $_REQUEST['number']))))
          $errors['err']=sprintf(__('%s: Unknown or invalid number.'), __('ticket'));
-     elseif(!$ticket->checkStaffPerm($thisstaff)) {
+     elseif(!$ticket || !$ticket->checkStaffPerm($thisstaff)) {
          $errors['err']=__('Access denied. Contact admin if you believe this is in error');
          $ticket=null; //Clear ticket obj.
      }
@@ -540,7 +540,7 @@ if($ticket) {
       require_once(sprintf('phar:///%s/plugins/audit.phar/class.audit.php', INCLUDE_DIR));
       $show = AuditEntry::$show_view_audits;
       $filename = sprintf('%s-audits-%s.csv',
-              $ticket->getNumber(), strftime('%Y%m%d'));
+              $ticket->getNumber(), date('Ymd'));
       $tableInfo = AuditEntry::getTableInfo($ticket, true);
       if (!Export::audits('ticket', $filename, $tableInfo, $ticket, 'csv', $show))
           $errors['err'] = __('Unable to dump query results.')

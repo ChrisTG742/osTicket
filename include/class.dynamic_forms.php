@@ -914,7 +914,7 @@ class DynamicFormField extends VerySimpleModel {
                 /* `variable` is used for automation. Internally it's called `name` */
                 ), "name");
         }
-        if ($this->get('name') && !preg_match('/^(?!\d)([[:alnum:]]|_|-)+$/u', $this->get('name')))
+        if ($this->get('name') && !preg_match('/^(?!\d)([[:alnum:]]|_)+$/u', $this->get('name')))
             $this->addError(__(
                 'Invalid character in variable name. Please use letters and numbers only.'
             ), 'name');
@@ -1032,6 +1032,10 @@ class DynamicFormEntry extends VerySimpleModel {
 
     function getInstructions() {
         return $this->form->getInstructions();
+    }
+
+    function getNotice() {
+        return  $this->form->getNotice();
     }
 
     function getDynamicForm() {
@@ -1211,7 +1215,7 @@ class DynamicFormEntry extends VerySimpleModel {
         return $entries[$ticket_id];
     }
 
-    function forTask($id, $force=false) {
+    static function forTask($id, $force=false) {
         static $entries = array();
         if (!isset($entries[$id]) || $force) {
             $stuff = DynamicFormEntry::objects()->filter(array(
@@ -1351,7 +1355,7 @@ class DynamicFormEntry extends VerySimpleModel {
                     //use getChanges if getClean returns an empty array
                     $fieldClean = $field->getClean() ?: $field->getChanges();
                     if (is_array($fieldClean) && $fieldClean[0])
-                        $fieldClean = json_decode($fieldClean[0], true);
+                        $fieldClean = is_string($fieldClean[0]) ? json_decode($fieldClean[0], true) : $fieldClean[0];
                 } else
                     $fieldClean = $field->getClean();
 
@@ -1589,7 +1593,7 @@ class SelectionField extends FormField {
         $selection = array();
 
         if ($value && !is_array($value))
-            $value = array($value);
+            $value = JsonDataParser::parse($value) ?: array($value);
 
         if ($value && is_array($value)) {
             foreach ($value as $k=>$v) {
@@ -1629,6 +1633,7 @@ class SelectionField extends FormField {
             $values = array();
             $choices = $this->getChoices();
             foreach (explode(',', $value) as $V) {
+                $V = trim($V);
                 if (isset($choices[$V]))
                     $values[$V] = $choices[$V];
             }
@@ -1729,6 +1734,7 @@ class SelectionField extends FormField {
                         ?: __('Unknown or invalid input');
                 }
             } elseif ($config['typeahead']
+                    && $entry
                     && ($entered = $this->getWidget()->getEnteredValue())
                     && !in_array($entered, $entry)
                     && $entered != $entry) {
@@ -1912,7 +1918,7 @@ class SelectionField extends FormField {
         $name = $name ?: $this->get('name');
         $val = $value;
         if ($value && is_array($value))
-            $val = '"?'.implode('("|,|$)|"?', array_keys($value)).'("|,|$)';
+            $val = '"?(?<![0-9])'.implode('("|,|$)|"?(?<![0-9])', array_keys($value)).'("|,|$)';
         switch ($method) {
         case '!includes':
             return Q::not(array("{$name}__regex" => $val));

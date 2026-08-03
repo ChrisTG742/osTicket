@@ -704,7 +704,7 @@ implements Searchable {
             // osTicket, the Mailer class can break it apart. If it came
             // from this help desk, the 'loopback' property will be set
             // to true.
-            $mid_info = Mailer::decodeMessageId($mid);
+            $mid_info = osTicket\Mail\Mailer::decodeMessageId($mid);
             if (!$mid_info || !$mid_info['loopback'])
                 continue;
             if (isset($mid_info['uid'])
@@ -890,15 +890,15 @@ implements TemplateVariable {
         // Mail sent by this system will have a predictable message-id
         // If this incoming mail matches the code, then it very likely
         // originated from this system and looped
-        $info = Mailer::decodeMessageId($mailinfo['mid']);
+        $info = osTicket\Mail\Mailer::decodeMessageId($mailinfo['mid']);
         if ($info && $info['loopback']) {
             // This mail was sent by this system. It was received due to
             // some kind of mail delivery loop. It should not be considered
             // a response to an existing thread entry
             if ($ost)
                 $ost->log(LOG_ERR, _S('Email loop detected'), sprintf(
-                _S('It appears as though &lt;%s&gt; is being used as a forwarded or fetched email account and is also being used as a user / system account. Please correct the loop or seek technical assistance.'),
-                $mailinfo['email']),
+                _S('It appears as though %s is being used as a forwarded or fetched email account and is also being used as a user / system account. Please correct the loop or seek technical assistance.\n\n%s'),
+                $mailinfo['email'], $mailinfo['header']),
 
                 // This is quite intentional -- don't continue the loop
                 false,
@@ -1454,7 +1454,7 @@ implements TemplateVariable {
             // osTicket, the Mailer class can break it apart. If it came
             // from this help desk, the 'loopback' property will be set
             // to true.
-            $mid_info = Mailer::decodeMessageId($mid);
+            $mid_info = osTicket\Mail\Mailer::decodeMessageId($mid);
             if (!$mid_info || !$mid_info['loopback'])
                 continue;
             if (isset($mid_info['uid'])
@@ -1532,7 +1532,7 @@ implements TemplateVariable {
      * Find a thread entry from a message-id created from the
      * ::asMessageId() method.
      *
-     * *DEPRECATED* use Mailer::decodeMessageId() instead
+     * *DEPRECATED* use osTicket\Mail\Mailer::decodeMessageId() instead
      */
     function lookupByRefMessageId($mid, $from) {
         global $ost;
@@ -1665,13 +1665,14 @@ implements TemplateVariable {
 
         $entry = new static(array(
             'created' => SqlFunction::NOW(),
+            'updated' => SqlFunction::NOW(),
             'type' => $vars['type'],
             'thread_id' => $vars['threadId'],
             'title' => Format::strip_emoticons(Format::sanitize($vars['title'], true)),
             'format' => $vars['body']->getType(),
             'staff_id' => $vars['staffId'],
             'user_id' => $vars['userId'],
-            'poster' => $poster,
+            'poster' => Format::sanitize($poster),
             'source' => $vars['source'],
             'flags' => $vars['flags'] ?: 0,
         ));
@@ -1756,6 +1757,10 @@ implements TemplateVariable {
                         $files[$i]['inline'] = true;
                 }
                 foreach ($entry->normalizeFileInfo($files) as $F) {
+                    if (!empty($F['inline'])
+                            && (!isset($F['file']) || !$F['file']->isInlineSafeImage()))
+                        $F['inline'] = false;
+
                     // Deduplicate on the `key` attribute. The key is
                     // necessary for the CID rewrite below
                     $attached_files[$F['key']] = $F;
@@ -1768,6 +1773,9 @@ implements TemplateVariable {
         // discarded, only the unique hash-code (key) will be available to
         // retrieve the image later
         foreach ($attached_files as $key => $a) {
+            if (empty($a['inline']))
+                continue;
+
             if (isset($a['cid']) && $a['cid']) {
                 $body = preg_replace('/src=("|\'|\b)(?:cid:)?'
                     . preg_quote($a['cid'], '/').'\1/i',
@@ -2115,6 +2123,7 @@ class ThreadEvent extends VerySimpleModel {
                 case 'timestamp':
                     $timeFormat = null;
                     if ($mode != self::MODE_CLIENT && $thisstaff
+                            && (!isset($_REQUEST['a']) || $_REQUEST['a']!='print')
                             && !strcasecmp($thisstaff->datetime_format,
                                 'relative')) {
                         $timeFormat = function ($timestamp) {
@@ -2200,8 +2209,8 @@ class ThreadEvent extends VerySimpleModel {
 
         $inst = self::create(array(
             'thread_type' => ObjectModel::OBJECT_TYPE_TICKET,
-            'staff_id' => $staff,
-            'team_id' => $ticket->getTeamId(),
+            'staff_id' => $staff ?: 0,
+            'team_id' => $ticket->getTeamId() ?: 0,
             'dept_id' => $ticket->getDeptId(),
             'topic_id' => $ticket->getTopicId(),
         ), $user);
@@ -2211,8 +2220,8 @@ class ThreadEvent extends VerySimpleModel {
     static function forTask($task, $state, $user=false) {
         $inst = self::create(array(
             'thread_type' => ObjectModel::OBJECT_TYPE_TASK,
-            'staff_id' => $task->getStaffId(),
-            'team_id' => $task->getTeamId(),
+            'staff_id' => $task->getStaffId() ?: 0,
+            'team_id' => $task->getTeamId() ?: 0,
             'dept_id' => $task->getDeptId(),
         ), $user);
         return $inst;
@@ -2285,7 +2294,7 @@ class Event extends VerySimpleModel {
     static function getStates($dropdown=false) {
         $names = array();
         if ($dropdown)
-            $names = array(__('All'));
+            $names = array('All');
 
         $events = self::objects()->values_flat('name');
         foreach ($events as $val)

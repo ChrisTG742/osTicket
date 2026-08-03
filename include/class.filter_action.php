@@ -89,7 +89,7 @@ class FilterAction extends VerySimpleModel {
         return $this->_impl;
     }
 
-    static function setFilterFlags(?object $actions=null, $flag, $bool) {
+    static function setFilterFlags(?object $actions, $flag, $bool) {
         $flag = constant($flag);
         if ($actions)
             foreach ($actions as $action)
@@ -642,7 +642,7 @@ class FA_SendEmail extends TriggerAction {
 
         // Honor FROM address settings
         if (!$config['from'] || !($mailer = Email::lookup($config['from'])))
-            $mailer = new Mailer();
+            $mailer = new osTicket\Mail\Mailer();
 
         // Allow %{user} in the To: line
         $replacer = new VariableReplacer();

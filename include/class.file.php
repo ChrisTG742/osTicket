@@ -16,6 +16,19 @@ require_once(INCLUDE_DIR.'class.error.php');
 
 
 /**
+ * FileObject Interface
+ *
+ * Methods File Objects should support
+ **/
+interface FileObjectInterface {
+    function getUId();
+    function getKey();
+    function getName();
+    function getData();
+    function getMimeType();
+}
+
+/**
  * Represents a file stored in a storage backend. It is generally attached
  * to something; however company logos, login page backdrops, and other
  * items are also stored in the database for various purposes.
@@ -29,8 +42,8 @@ require_once(INCLUDE_DIR.'class.error.php');
  *    - 'L' => Logo
  *    - 'B' => Backdrop
  */
-class AttachmentFile extends VerySimpleModel {
-
+class AttachmentFile extends VerySimpleModel
+    implements FileObjectInterface {
     static $meta = array(
         'table' => FILE_TABLE,
         'pk' => array('id'),
@@ -69,6 +82,10 @@ class AttachmentFile extends VerySimpleModel {
 
     function getId() {
         return $this->id;
+    }
+
+    function getUId() {
+        return $this->getId();
     }
 
     function getType() {
@@ -158,6 +175,10 @@ class AttachmentFile extends VerySimpleModel {
     }
 
     function display($scale=false, $ttl=86400) {
+        // Force download if not safe viewable image
+        if (!$this->isInlineSafeImage())
+            return $this->download(false, 'attachment');
+
         $this->makeCacheable($ttl);
 
         if ($scale && extension_loaded('gd')
@@ -196,6 +217,12 @@ class AttachmentFile extends VerySimpleModel {
                 && ($a=$this->attachments->findFirst(array(
                             'type' => $options['type']))))
             $options['id'] = $a->getId();
+
+        // Force attachment disposition if not inline-safe image
+        if (isset($options['disposition'])
+                && strcasecmp($options['disposition'], 'inline') == 0
+                && !$this->isInlineSafeImage())
+            $options['disposition'] = 'attachment';
 
         return static::generateDownloadUrl($this->getId(),
                 strtolower($this->getKey()), $this->getSignature(),
@@ -250,7 +277,8 @@ class AttachmentFile extends VerySimpleModel {
 
         $check = static::_genUrlSignature($this->getId(), $this->getKey(),
             $this->getSignature(), $expires);
-        return $signature == $check;
+
+        return hash_equals($check, $signature);
     }
 
     static function _genUrlSignature($id, $key, $signature, $expires) {
@@ -270,7 +298,7 @@ class AttachmentFile extends VerySimpleModel {
         $inline = ($thisstaff ? ($thisstaff->getImageAttachmentView() === 'inline') : false);
         $disposition = ((($disposition && strcasecmp($disposition, 'inline') == 0)
               || $inline)
-              && strpos($this->getType(), 'image/') !== false)
+              && $this->isInlineSafeImage())
             ? 'inline' : 'attachment';
         $ttl = ($expires) ? $expires - Misc::gmtime() : false;
         $bk = $this->open();
@@ -349,6 +377,7 @@ class AttachmentFile extends VerySimpleModel {
                 case IMAGETYPE_GIF:
                 case IMAGETYPE_JPEG:
                 case IMAGETYPE_PNG:
+                case IMAGETYPE_WEBP:
                     break;
                 default:
                     $error = __('Invalid image file type');
@@ -370,6 +399,7 @@ class AttachmentFile extends VerySimpleModel {
                 case IMAGETYPE_GIF:
                 case IMAGETYPE_JPEG:
                 case IMAGETYPE_PNG:
+                case IMAGETYPE_WEBP:
                     break;
                 default:
                     $error = __('Invalid image file type');
@@ -477,9 +507,11 @@ class AttachmentFile extends VerySimpleModel {
                 elseif ($bk->write($file['data']) && $bk->flush()) {
                     $succeeded = true; break;
                 }
-            }
-            catch (Exception $e) {
+            } catch (Throwable $t) {
                 // Try next backend
+                // Backends can throw an exception or error.
+                // TODO: Log any exceptions and errors for debugging
+                // purposes.
             }
             // Fallthrough to default backend if different?
         }
@@ -610,9 +642,16 @@ class AttachmentFile extends VerySimpleModel {
     static function lookupByHash($hash) {
         if (isset(static::$keyCache[$hash]))
             return static::$keyCache[$hash];
-
         // Cache a negative lookup if no such file exists
-        return parent::lookup(array('key' => $hash));
+        try {
+            return parent::lookup(array('key' => $hash));
+        } catch (ObjectNotUnique $e) {
+            // TODO: Figure out why key collission might be happening AND
+            // make key (hash) unique field in the file table as a
+            // protection measure. For now we're returning null to avoid possible wrong file
+            // being displayed.
+            return null;
+        }
     }
 
     static function lookup($id) {
@@ -692,6 +731,29 @@ class AttachmentFile extends VerySimpleModel {
         return static::objects()
             ->filter(array('ft' => 'B'))
             ->order_by('created');
+    }
+
+    /**
+     * Determines whether a MIME type is safe to render inline as a passive image.
+     *
+     * @param string $type
+     * @return bool
+     */
+    static function isInlineSafeImageType($type) {
+        $type = strtolower(trim((string) $type));
+
+        return strpos($type, 'image/') === 0
+            && $type !== 'image/svg+xml'
+            && $type !== 'image/svg';
+    }
+
+    /**
+     * Determines whether this file is safe to render inline as a passive image.
+     *
+     * @return bool
+     */
+    function isInlineSafeImage() {
+        return static::isInlineSafeImageType($this->getType());
     }
 }
 
@@ -1020,12 +1082,27 @@ class OneSixAttachments extends FileStorageBackend {
 FileStorageBackend::register('6', 'OneSixAttachments');
 
 // FileObject - wrapper for SplFileObject class
-class FileObject extends SplFileObject {
+class FileObject extends SplFileObject
+    implements FileObjectInterface {
 
+    protected $_key;
+    protected $_sig;
     protected $_filename;
 
     function __construct($file, $mode='r') {
         parent::__construct($file, $mode);
+    }
+
+    function getUId() {
+        return $this->getKey();
+    }
+
+    function getKey() {
+        if (!isset($this->_key))
+            list($this->_key, $this->_sig) = AttachmentFile::_getKeyAndHash(
+                $this->getContents());
+
+        return $this->_key;
     }
 
     /* This allows us to set REAL file name as opposed to basename of the
@@ -1039,6 +1116,10 @@ class FileObject extends SplFileObject {
         return $this->_filename ?: parent::getFilename();
     }
 
+    function getName() {
+        return $this->getFilename();
+    }
+
     /*
      * Set mime type - well formated mime is expected.
      */
@@ -1047,12 +1128,8 @@ class FileObject extends SplFileObject {
     }
 
     function getMimeType() {
-        if (!isset($this->_mimetype)) {
-            // Try to to auto-detect mime type
-            $finfo = new finfo(FILEINFO_MIME);
-            $this->_mimetype = $finfo->buffer($this->getContents(),
-                    FILEINFO_MIME_TYPE);
-        }
+        if (!isset($this->_mimetype))
+            $this->_mimetype = self::mime_type($this->getRealPath());
 
         return $this->_mimetype;
     }
@@ -1067,6 +1144,28 @@ class FileObject extends SplFileObject {
      */
     function getData() {
         return $this->getContents();
+    }
+
+    /*
+     * Given a filepath - auto detect the mime type
+     *
+     */
+    static function mime_type($filepath) {
+        // Try to to auto-detect mime type
+        $type = null;
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $type = finfo_file($finfo, $filepath);
+            finfo_close($finfo);
+        }
+        return $type ?: mime_content_type($filepath);
+    }
+
+    /*
+     * Compare mime type of file content to a given mime
+     */
+    static function mimecmp($filepath, $mime) {
+        return strcasecmp(self::mime_type($filepath), $mime) !== 0;
     }
 }
 

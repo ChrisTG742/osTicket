@@ -21,7 +21,7 @@ if ($_POST['export']) {
     $report = new OverviewReport($_POST['start'], $_POST['period']);
     switch (true) {
     case ($data = $report->getTabularData($_POST['export'])):
-        $ts = strftime('%Y%m%d');
+        $ts = date('Ymd');
         $group = Format::slugify($_POST['export']);
         $delimiter = ',';
         if (class_exists('NumberFormatter')) {
@@ -35,9 +35,9 @@ if ($_POST['export']) {
         Http::download("stats-$group-$ts.csv", 'text/csv');
         $output = fopen('php://output', 'w');
         fputs($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
-        fputcsv($output, $data['columns'], $delimiter);
+        fputcsv($output, $data['columns'], $delimiter, "\"", "");
         foreach ($data['data'] as $row)
-            fputcsv($output, $row, $delimiter);
+            fputcsv($output, $row, $delimiter, "\"", "");
         exit;
     }
 }

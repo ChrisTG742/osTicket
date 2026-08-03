@@ -955,7 +955,7 @@ class ScheduleEntry extends VerySimpleModel {
                 // range at the moment - assuming ends on the same day.
                 $source['ends_at'] = $ends->format('h:i a');
                 if (($stops=$this->getStopsDatetime()))
-                    $source['stops_on'] = $stops->setTimestamp();
+                    $source['stops_on'] = $stops->getTimestamp();
 
                 // See if time spans all day.
                 if ($this->isFullDay())
@@ -1049,13 +1049,15 @@ class ScheduleEntry extends VerySimpleModel {
     }
 
     static function getDays() {
-        static $translated = false;
-        if (!$translated) {
-            foreach (static::$days as $k=>$v)
-                static::$days[$k] = __($v);
-        }
+        return self::$days;
+    }
 
-        return static::$days;
+    static function getTranslatedDays() {
+        static $translated = null;
+        if (!isset($translated))
+            $translated = array_map(function ($d) { return __($d); }, static::getDays());
+
+        return $translated;
     }
 
     static function getWeeks() {
@@ -1176,7 +1178,7 @@ extends AbstractForm {
                     'default' => "",
                     'layout' => new GridFluidCell(6),
                     'label' => __('Day of the Week'),
-                    'choices' => ScheduleEntry::getDays() + array(
+                    'choices' => ScheduleEntry::getTranslatedDays() + array(
                         'weekdays' => sprintf('%s (%s)',
                             __('Weekdays'), __('Mon-Fri')),
                         'weekends' => sprintf('%s (%s)',
@@ -1212,7 +1214,7 @@ extends AbstractForm {
                     'default' => "",
                     'layout' => new GridFluidCell(6),
                     'label' => __('Day'),
-                    'choices' => ScheduleEntry::getDays(),
+                    'choices' => ScheduleEntry::getTranslatedDays(),
                     'validator-error' => __('Selection required'),
                     'visibility' => new VisibilityConstraint(
                         new Q(array('monthly__neq'=>'day')),
@@ -1241,7 +1243,7 @@ extends AbstractForm {
                     'default' => '',
                     'layout' => new GridFluidCell(4),
                     'label' => __('Day'),
-                    'choices' => ScheduleEntry::getDays(),
+                    'choices' => ScheduleEntry::getTranslatedDays(),
                     'validator-error' => __('Selection required'),
                     'configuration'=>array('prompt'=>__('Day')),
                     'visibility' => new VisibilityConstraint(
@@ -1299,11 +1301,7 @@ extends AbstractForm {
 
         if ($errors) {
             // Replay any errors back on the form fields
-            foreach ($errors as $k => $error) {
-                if (($f=$this->getField($k)))
-                    $f->addError($error);
-            }
-
+            $this->addErrors($errors);
             return false;
         }
 

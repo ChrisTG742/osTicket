@@ -120,10 +120,11 @@ extends InstrumentedList {
         }
         $attachments = array();
         // Format $new for upload() with new name
-        foreach ($ids as $id=>$name) {
+        foreach ($ids as $id=>$value) {
+            if (is_array($value)) list('id' => $id, 'name' => $value) = $value;
             $attachments[] = array(
                     'id' => $id,
-                    'name' => $name
+                    'name' => $value
                 );
         }
         // Everything remaining in $attachments is truly new
@@ -191,7 +192,7 @@ extends InstrumentedList {
     function getInlines($lang=false) { return $this->_getList(false, true, $lang); }
     function getSeparates($lang=false) { return $this->_getList(true, false, $lang); }
     function getAll($lang=false) { return $this->_getList(true, true, $lang); }
-    function count($lang=false) { return count($this->getSeparates($lang)); }
+    function count($lang=false): int { return count($this->getSeparates($lang)); }
 
     function _getList($separates=false, $inlines=false, $lang=false) {
         $base = $this;

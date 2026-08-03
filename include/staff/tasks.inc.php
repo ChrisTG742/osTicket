@@ -5,17 +5,9 @@ $date_header = $date_col = false;
 // Make sure the cdata materialized view is available
 TaskForm::ensureDynamicDataView();
 
-// Figure out REFRESH url — which might not be accurate after posting a
-// response
-list($path,) = explode('?', $_SERVER['REQUEST_URI'], 2);
-$args = array();
-parse_str($_SERVER['QUERY_STRING'], $args);
-
-// Remove commands from query
-unset($args['id']);
-unset($args['a']);
-
-$refresh_url = htmlspecialchars($path) . '?' . http_build_query($args);
+// Remove some variables from query string.
+$qsFilter = ['id', 'a'];
+$refresh_url = Http::refresh_url($qsFilter);
 
 $sort_options = array(
     'updated' =>            __('Most Recently Updated'),
@@ -160,7 +152,7 @@ $tasks->annotate(array(
     ),
 ));
 
-$tasks->values('id', 'number', 'created', 'staff_id', 'team_id',
+$tasks->values('id', 'number', 'created', 'staff_id', 'dept_id', 'team_id',
         'staff__firstname', 'staff__lastname', 'team__name',
         'dept__name', 'cdata__title', 'flags', 'ticket__number', 'ticket__ticket_id');
 // Apply requested quick filter

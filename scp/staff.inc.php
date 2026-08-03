@@ -96,13 +96,17 @@ if(!$thisstaff->isAdmin()) {
         exit;
     }
 }
+/******* SET STAFF DEFAULTS **********/
+define('PAGE_LIMIT', $thisstaff->getPageLimit() ?: DEFAULT_PAGE_LIMIT);
+define('SESSION_MAXLIFE', $thisstaff->getMaxIdleTime());
 
 //Keep the session activity alive
 $thisstaff->refreshSession();
 
 /******* CSRF Protectin *************/
-// Enforce CSRF protection for POSTS
-if ($_POST  && !$ost->checkCSRFToken()) {
+// Enforce CSRF protection for state-changing methods
+if (in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'PATCH', 'DELETE'])
+        && !$ost->checkCSRFToken()) {
     Http::response(400, __('Valid CSRF Token Required'));
     exit;
 }
@@ -113,8 +117,6 @@ $ost->addExtraHeader('<meta name="csrf_token" content="'.$ost->getCSRFToken().'"
 // Load the navigation after the user in case some things are hidden
 require_once(INCLUDE_DIR.'class.nav.php');
 
-/******* SET STAFF DEFAULTS **********/
-define('PAGE_LIMIT', $thisstaff->getPageLimit() ?: DEFAULT_PAGE_LIMIT);
 
 $tabs=array();
 $submenu=array();

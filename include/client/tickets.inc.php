@@ -101,7 +101,7 @@ if ($settings['keywords']) {
         $tickets->filter(array('number__startswith'=>$q));
     } elseif (strlen($q) > 2) { //Deep search!
         // Use the search engine to perform the search
-        $tickets = $ost->searcher->find($q, $tickets);
+        $tickets = $ost->searcher->find($q, $tickets, true, ['boolean' => false]);
     }
 }
 
@@ -171,7 +171,7 @@ foreach (Topic::getHelpTopics(true) as $id=>$name) {
 
 
 <h1 style="margin:10px 0">
-    <a href="<?php echo Format::htmlchars($_SERVER['REQUEST_URI']); ?>"
+    <a href="<?php echo Http::refresh_url(); ?>"
         ><i class="refresh icon-refresh"></i>
     <?php echo __('Tickets'); ?>
     </a>

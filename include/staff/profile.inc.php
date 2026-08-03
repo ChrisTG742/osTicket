@@ -84,7 +84,7 @@ if ($avatar->isChangeable()) { ?>
         <tr>
           <td><?php echo __('Mobile Number');?>:</td>
           <td>
-            <input type="tel" size="18" name="mobile" class="auto phone"
+            <input type="tel" size="18" name="mobile" class="auto mobile"
               value="<?php echo Format::htmlchars($staff->mobile); ?>" />
             <div class="error"><?php echo $errors['mobile']; ?></div>
           </td>
@@ -485,7 +485,7 @@ if (($bks=Staff2FABackend::allRegistered())) {
         <tr>
             <td colspan="2">
                 <textarea class="richtext no-bar" name="signature" cols="21"
-                    rows="5" style="width: 60%;"><?php echo $staff->signature; ?></textarea>
+                    rows="5" style="width: 60%;"><?php echo Format::viewableImages(Format::htmlchars($staff->signature, true)); ?></textarea>
             </td>
         </tr>
       </tbody>
